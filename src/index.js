@@ -3,6 +3,8 @@
 require('babel-polyfill');
 
 const Discord = require('discord.js');
+const moment = require('moment');
+moment.locale('pl')
 const FileSync = require('lowdb/adapters/FileSync');
 const logger = require('winston');
 const low = require('lowdb');
@@ -16,6 +18,8 @@ const config = require('../config');
 const adapter = new FileSync('.db.json');
 const db = low(adapter);
 db.defaults({ recents: { battleId: 0, eventId: 0 } }).write();
+
+const footer_logo_url = "https://i.imgur.com/4F09qpA.png";
 
 // Heroku will crash if we're not listenining on env.PORT.
 if (process.env.HEROKU) {
@@ -42,11 +46,6 @@ const bot = new Discord.Client();
 bot.on('ready', () => {
   logger.info('Connected');
   logger.info(`Logged in as: ${bot.user.username} - (${bot.user.id})`);
-
-  if (config.discord.statusChannelId) {
-    checkServerStatus();
-    setInterval(checkServerStatus, 60000);
-  }
 
   checkBattles();
   checkKillboard();
@@ -79,10 +78,13 @@ function checkBattles() {
 }
 
 function sendBattleReport(battle, channelId) {
+    logger.info('sendBattleReport...');
   if (battle.id > lastBattleId) {
     lastBattleId = battle.id;
     db.set('recents.battleId', lastBattleId).write();
   }
+    
+  let battleChannelId = config.discord.feedChannelId
 
   const title = battle.rankedFactions.slice()
     .sort((a, b) => b.players.length - a.players.length)
@@ -112,6 +114,7 @@ function sendBattleReport(battle, channelId) {
   });
 
   if (battle.is5v5) {
+    battleChannelId = config.discord._5v5ChannelId
     fields = battle.rankedFactions.map(({ name, kills, players }) => {
       return {
         name: `${name} [Kills: ${kills}]`,
@@ -136,13 +139,16 @@ function sendBattleReport(battle, channelId) {
       ? (didWin ? `We wrecked ${battle.rankedFactions[1].name} in a 5v5!` : `We lost to ${battle.rankedFactions[0].name} in a 5v5!`)
       : title,
     color: didWin ? 65280 : 16711680,
-    timestamp: battle.endTime,
+    footer: {
+      icon_url: footer_logo_url,
+      text: get_footer("Battleboard"), 
+    },
     thumbnail: { url: thumbnailUrl },
     image: { url: 'https://storage.googleapis.com/albion-images/static/spacer.png' },
     fields,
   };
 
-  bot.channels.get(channelId || config.discord.feedChannelId).send({ embed }).then(() => {
+  bot.channels.get(battleChannelId).send({ embed }).then(() => {
     logger.info(`Successfully posted log of battle between ${title}.`);
   }).catch(err => {
     logger.error(err);
@@ -150,6 +156,7 @@ function sendBattleReport(battle, channelId) {
 }
 
 function sendKillReport(event, channelId) {
+    logger.info('sendKillReport...');
   const isFriendlyKill = config.guild.guilds.indexOf(event.Killer.GuildName) !== -1;
 
   createImage('Victim', event).then(imgBuffer => {
@@ -161,6 +168,10 @@ function sendKillReport(event, channelId) {
       title: `${event.Killer.Name} (${assists ? '+' + assists : 'Solo!'}) just killed ${event.Victim.Name}!`,
       description: `From guild: ${createGuildTag(event[isFriendlyKill ? 'Victim' : 'Killer'])}`,
       color: isFriendlyKill ? 65280 : 16711680,
+      footer: {
+        icon_url: footer_logo_url,
+        text: get_footer("Killboard"), 
+      },
       image: { url: 'attachment://kill.png' },
     };
 
@@ -176,13 +187,12 @@ function sendKillReport(event, channelId) {
           value: createGuildTag(event[isFriendlyKill ? 'Victim' : 'Killer']),
           inline: true,
         }],
-        timestamp: event.TimeStamp,
       });
     }
 
     const files = [{ name: 'kill.png', attachment: imgBuffer }];
 
-    return bot.channels.get((channelId || config.discord.feedChannelId)).send({ embed, files });
+    return bot.channels.get(config.discord.solokillChannelId).send({ embed, files });
   }).then(() => {
     logger.info(`Successfully posted log of ${createDisplayName(event.Killer)} killing ${createDisplayName(event.Victim)}.`);
   });
@@ -222,100 +232,41 @@ function createDisplayName(player) {
   return `**<${allianceTag}${player.GuildName || 'Unguilded'}>** ${player.Name}`;
 }
 
-function sendServerStatus(channelId, isCmd) {
+function get_footer(text_to_set) {
+    let now = moment().format('LLLL');
+    return `${text_to_set} | ${now}`;
+}
+
+function test_footer() {
   let now = new Date();
+  let days = ['Niedziela', 'Poniedziałek', 'Wtorek', 'Środa', 'Czwartek', 'Piątek', 'Sobota'];
+  let months = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'lipiec', 'sierpień', 'wrzesień', 'październik', 'grudzień'];
+  let day = now.getDate();
+  let day_name = days[now.getDay()];
+  let month_name = months[now.getMonth()];
+  let year = now.getFullYear();
+  let hour = now.getHours()
 
   const embed = {
-    url: 'https://albiononline.statuspage.io',
     title: 'Albion Status Information',
-    description: isCmd
-      ? `Current server status is **${lastAlbionStatus}**`
-      : `Server status just changed to **${lastAlbionStatus}**`,
-    color: lastAlbionStatus === 'offline' ? 0xff2600 : 0x00f900,
+    description: 'blblel',
+    color: 16711680,
     fields: [{
       name: 'Message',
-      value: lastAlbionStatusMsg,
+      value: 'abc',
       inline: true,
     }],
-    timestamp: now.toISOString(),
+    footer: {
+      icon_url: footer_logo_url,
+      text: get_footer("TEST"), 
+    }
   };
 
-  bot.channels.get(channelId || config.discord.statusChannelId).send({ embed }).then(() => {
-    logger.info(`Successfully posted albion status: ${lastAlbionStatus}`);
+  bot.channels.get(config.discord.feedChannelId).send({ embed }).then(() => {
+    logger.info(`Successfully posted albion test`);
   }).catch(err => {
     logger.error(err);
   });
 }
-
-function checkServerStatus(channelId) {
-  logger.info('Checking server status...');
-
-  Albion.serverStatusRequest().then(currentAlbionStatus => {
-    if (lastAlbionStatus !== currentAlbionStatus.status || lastAlbionStatusMsg !== currentAlbionStatus.message) {
-      lastAlbionStatus = currentAlbionStatus.status;
-      lastAlbionStatusMsg = currentAlbionStatus.message;
-
-      sendServerStatus(channelId);
-
-      db.set('recents.albionStatus', currentAlbionStatus.status).write();
-      db.set('recents.albionStatusMsg', currentAlbionStatus.message).write();
-    }
-  });
-}
-
-bot.on('message', msg => {
-  let message = msg.content;
-  let channelID = msg.channel.id;
-
-  let matches = message.match(/^https:\/\/albiononline\.com\/en\/killboard\/kill\/(\d+)/);
-  if (matches && matches.length) {
-    Albion.getEvent(matches[1]).then(event => {
-      sendKillReport(event, channelID);
-    });
-    return;
-  }
-
-  matches = message.match(/^https:\/\/albiononline\.com\/en\/killboard\/battles\/(\d+)/);
-  if (matches && matches.length) {
-    Albion.getBattle(matches[1]).then(battle => {
-      sendBattleReport(new Battle(battle), channelID);
-    });
-    return;
-  }
-
-  if (message.substring(0, 1) !== '!') { return; }
-
-  const args = message.substring(1).split(' ');
-  const [cmd, id] = args;
-
-  if (!cmd) {
-    return;
-  }
-
-  // cmd without parameter
-  switch (cmd) {
-    case 'showStatus':
-      sendServerStatus(channelID, 1);
-      break;
-  }
-
-  if (!id) {
-    return;
-  }
-
-  // cmd with parameter
-  switch (cmd) {
-    case 'showBattle':
-      Albion.getBattle(id).then(battle => {
-        sendBattleReport(new Battle(battle), channelID);
-      });
-      break;
-    case 'showKill':
-      Albion.getEvent(id).then(event => {
-        sendKillReport(event, channelID);
-      });
-      break;
-  }
-});
 
 bot.login(config.discord.token);
